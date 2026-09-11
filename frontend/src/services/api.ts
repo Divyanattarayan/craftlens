@@ -1,5 +1,6 @@
 // CraftLens API Service - Gemini Vision-powered dynamic analysis
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
@@ -9,7 +10,41 @@ export const analyzeProductWithAi = async (
   userComment: string,
   _language: string
 ): Promise<AnalysisResult> => {
-  // Try Gemini Vision API first if key is configured
+  // 1. Try deployed backend API first (keeps GEMINI_API_KEY secure on server)
+  try {
+    const backendUrl = API_BASE_URL ? `${API_BASE_URL}/api/ai/analyze` : '/api/ai/analyze';
+    const res = await fetch(backendUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageUrl: imageBase64, userComment })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const catalogueImageUrl = await createProfessionalCatalogueImage(
+        imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`
+      );
+      return {
+        catalogueImageUrl,
+        detectedCategory: data.detectedCategory || 'Handcraft',
+        extractedFacts: data.extractedFacts || {
+          material: 'Not provided', craftsmanship: 'Not provided', dimensions: 'Not provided', origin: 'Not identifiable'
+        },
+        titleEnglish: data.titleEnglish || 'Handcrafted Artisan Product',
+        titleTamil: data.titleTamil || 'கைவினை கலைப்பொருள்',
+        descriptionEnglish: data.descriptionEnglish || userComment || 'Authentic handcrafted artisan product.',
+        descriptionTamil: data.descriptionTamil || userComment || 'உண்மையான கைவினை பொருள்.',
+        minPrice: data.minPrice || 400,
+        maxPrice: data.maxPrice || 2500,
+        recommendedPrice: data.recommendedPrice || 850,
+        qualityScore: data.qualityScore || 78,
+        improvements: data.improvements || []
+      };
+    }
+  } catch (err) {
+    console.warn('Backend AI analysis endpoint unavailable, using direct analysis fallback:', err);
+  }
+
+  // 2. Try direct Gemini Vision API if VITE_GEMINI_API_KEY environment variable is present
   if (GEMINI_API_KEY) {
     try {
       return await analyzeWithGeminiVision(imageBase64, userComment);
@@ -17,7 +52,7 @@ export const analyzeProductWithAi = async (
       console.warn('Gemini Vision API failed, falling back to client-side analysis:', err);
     }
   }
-  // Fallback to client-side canvas + keyword analysis
+  // 3. Fallback to client-side canvas + keyword analysis
   return generateDynamicImageAnalysis(imageBase64, userComment);
 };
 
